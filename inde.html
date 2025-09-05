@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WORK_ORDER_EM - Multi Menu</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+body { font-family: Arial; font-size: 12px; margin: 12px; }
+.tabs { display:flex; gap:8px; margin-bottom:12px; }
+.tab { padding:8px 14px; background:#e9f0ff; border-radius:6px; cursor:pointer; user-select:none; }
+.tab.active { background:#2f80ed; color:white; font-weight:600; }
+.panel { display:none; }
+.panel.active { display:block; }
+.filter-container { margin-bottom: 12px; padding: 10px; background-color: #f7f7f7; border-radius: 6px; }
+.filter-container label { margin-right: 8px; font-size: 13px; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+th, td { border: 1px solid #ccc; padding: 6px; }
+th { background-color: #eee; cursor: pointer; user-select: none; position: relative; }
+th.sort-asc::after { content: " ▲"; font-size: 10px; color: #333; }
+th.sort-desc::after { content: " ▼"; font-size: 10px; color: #333; }
+tbody tr:nth-child(odd) { background: #fbfdff; }
+tbody tr:hover { background: #eef6ff; }
+.small { font-size:11px; color:#333; }
+.controls { margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.btn { padding:6px 10px; border-radius:4px; border:1px solid #ccc; background:white; cursor:pointer; }
+td.duplicate { background-color: orange !important; }
+</style>
+</head>
+<body>
+<h2>WORK_ORDER_EM</h2>
+
+<div class="tabs">
+  <div class="tab active" id="tab-work">Work Order</div>
+  <div class="tab" id="tab-manual">List Manual</div>
+</div>
+
+<!-- PANEL 1: Work Order -->
+<div class="panel active" id="panel-work">
+  <div class="filter-container">
+    <label>Room: <input type="text" id="w-filter-room" placeholder="filter Room"></label>
+    <label>Order: <input type="text" id="w-filter-order" placeholder="filter Order"></label>
+    <label>MAT: <input type="text" id="w-filter-mat" placeholder="filter MAT"></label>
+    <label>Section: <input type="text" id="w-filter-section" placeholder="filter Section"></label>
+    <label>CPH: <input type="text" id="w-filter-cph" placeholder="filter CPH"></label>
+    <label>Status: <input type="text" id="w-filter-status" placeholder="filter Status"></label>
+    <div class="controls">
+      <input type="file" id="w-upload" accept=".xlsx" />
+      <button class="btn" id="w-clear">Clear filters</button>
+    </div>
+  </div>
+  <table id="w-table" class="small"></table>
+</div>
+
+<!-- PANEL 2: List Manual -->
+<div class="panel" id="panel-manual">
+  <div class="filter-container">
+    <label>Room: <input type="text" id="m-filter-room" placeholder="filter Room"></label>
+    <label>Order: <input type="text" id="m-filter-order" placeholder="filter Order"></label>
+    <label>Description: <input type="text" id="m-filter-description" placeholder="filter Description"></label>
+    <label>MAT: <input type="text" id="m-filter-mat" placeholder="filter MAT"></label>
+    <label>Month: <input type="text" id="m-filter-month" placeholder="filter Month"></label>
+    <label>Reman: <input type="text" id="m-filter-reman" placeholder="filter Reman"></label>
+    <div class="controls">
+      <textarea id="m-input-orders" rows="2" placeholder="Paste orders here (space/newline separated)"></textarea>
+      <button class="btn" id="m-add">Add Order</button>
+      <button class="btn" id="m-clear">Clear filters</button>
+      <button class="btn" id="m-save">Save JSON</button>
+      <input type="file" id="m-load" accept="application/json" />
+    </div>
+  </div>
+  <table id="m-table" class="small"></table>
+</div>
+
+<script>
+// ================= Helpers =================
+function formatDateFromSerialOrDate(v){
+  if(v===null||v===undefined||v==='')return"";
+  const o={day:'2-digit',month:'short',year:'numeric'};
+  if(v instanceof Date) return v.toLocaleDateString('en-US',o).replace(/ /g,'-');
+  if(typeof v==='number') return new Date(Math.round((v-25569)*86400*1000)).toLocaleDateString('en-US',o).replace(/ /g,'-');
+  const p=Date.parse(String(v));
+  if(!isNaN(p)) return new Date(p).toLocaleDateString('en-US',o).replace(/ /g,'-');
+  return String(v);
+}
+function formatCurrency(v){
+  if(v===null||v===undefined||v==='')return"";
+  const n=Number(String(v).replace(/[^0-9.-]/g,''));
+  return !isNaN(n)?("$"+Math.round(n).toLocaleString()):String(v);
+}
+function applyStyleToTd(td, col, val){
+  if(!td) return;
+  const c = String(col||'').toLowerCase();
+  const v = (val===null||val===undefined) ? '' : String(val).trim();
+  td.style.backgroundColor = ""; td.style.color = ""; td.style.textAlign = "";
+
+  if(["order","order number","created on","planning","target date","end date","cost","include","exclude"].includes(c)) {
+    td.style.textAlign="right";
+  } else if(["user status","mat"].includes(c)) {
+    td.style.textAlign="center";
+  } else {
+    td.style.textAlign="left";
+  }
+
+  if(c==="status part"){
+    if(v==="Complete"){td.style.backgroundColor="green";td.style.color="white";}
+    else if(v==="Not Complete"){td.style.backgroundColor="red";td.style.color="white";}
+  } else if(c==="aging"){
+    const a=parseInt(v,10); 
+    if(!isNaN(a)){td.style.backgroundColor=(a<=30)?"green":"red";td.style.color="white";}
+  } else if(c==="status amt"){
+    if(v==="O"){td.style.backgroundColor="lightgray";td.style.color="black";}
+    else if(v==="YTS"){td.style.backgroundColor="green";td.style.color="white";}
+    else if(v==="IP"){td.style.backgroundColor="orange";td.style.color="red";}
+    else if(v==="C"){td.style.backgroundColor="black";td.style.color="white";}
+  } else if(c==="month" || c==="reman"){
+    if(!v){ td.style.backgroundColor="yellow"; td.style.color="black"; }
+  }
+}
+function parseValueForSort(t){
+  const s=(t===null||t===undefined)?'':String(t).trim();
+  if(s==='')return'';
+  const n=Number(s.replace(/[^0-9.\-]/g,''));
+  if(!isNaN(n)&&/[0-9]/.test(s)) return n;
+  const p=Date.parse(s);
+  if(!isNaN(p)) return p;
+  return s.toLowerCase();
+}
+function clearSortIndicators(t){
+  if(!t)return;
+  t.querySelectorAll('th').forEach(th=>{th.classList.remove('sort-asc','sort-desc');delete th.dataset.sorted;});
+}
+function debounce(fn,wait){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),wait);};}
+function getIndex(headers,keyword){keyword=(keyword||'').toLowerCase();return headers.findIndex(h=>(h||'').toLowerCase().includes(keyword));}
+
+// debounce khusus untuk updateWorkTable
+const debouncedUpdateWorkTable = debounce(updateWorkTable, 300);
+
+// ================= Tab Switch =================
+const tabs=document.querySelectorAll('.tab');const panels=document.querySelectorAll('.panel');
+tabs.forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    tabs.forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    panels.forEach(p=>p.classList.remove('active'));
+    const pid='panel-'+tab.id.split('-')[1];
+    document.getElementById(pid).classList.add('active');
+  });
+});
+
+// ================= Global Data =================
+let wHeaders=[]; let wData=[]; const wTable=document.getElementById('w-table');
+let mHeaders=["Room","Order Type","Order Number","Description","MAT","Month","Reman","Cost","Action"];
+let mData=[]; const mTable=document.getElementById("m-table");
+
+
+// ================= Upload Excel Menu 1 =================
+document.getElementById('w-upload').addEventListener('change',function(e){
+  const f=e.target.files[0]; if(!f) return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    const data=new Uint8Array(ev.target.result);
+    const wb=XLSX.read(data,{type:'array'});
+    const sheet=wb.Sheets[wb.SheetNames[0]];
+    const json=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true});
+    if(!json||json.length===0){alert('No data');return;}
+    wHeaders=json[0].map(h=>h?String(h).trim():"");
+    wData=json.slice(1).map(r=>{const obj={}; wHeaders.forEach((h,i)=>obj[h]=r[i]); return obj;});
+    buildTableFromJson(wTable,wHeaders,json.slice(1));
+    applyWorkFilters();
+  };
+  reader.readAsArrayBuffer(f);
+});
+// ================= Build Table Menu 1 =================
+function buildTableFromJson(tableEl, headers, rows) {
+  while (tableEl.firstChild) tableEl.removeChild(tableEl.firstChild);
+
+  const thead = document.createElement('thead');
+  const tr = document.createElement('tr');
+  headers.forEach((h, i) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    th.dataset.colIndex = i;
+    th.addEventListener('click', () => sortTableByIndex(tableEl, i, th));
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr);
+  tableEl.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  const frag = document.createDocumentFragment();
+
+  rows.forEach(r => {
+    const row = document.createElement('tr');
+
+    headers.forEach((col, i) => {
+      let raw = (r[i] !== undefined && r[i] !== null) ? r[i] : "";
+      let txt = "";
+      const lc = String(col || "").toLowerCase();
+
+      if (["created on","planning","target date","end date"].includes(lc)) {
+        txt = formatDateFromSerialOrDate(raw);
+      } else if (["cost"].includes(lc)) {
+        txt = formatCurrency(raw);
+      } else {
+        txt = String(raw);
+      }
+
+ // lookup khusus: hanya Month & Reman dari mData
+if (lc === "month" || lc === "reman") {
+  const orderIdx = getIndex(headers, "order number");
+  const orderVal = orderIdx >= 0 ? r[orderIdx] : "";
+  const orderNo = (orderVal === undefined || orderVal === null) ? "" : String(orderVal).trim();
+  if(orderNo){
+    const found = mData.find(d => String(d["Order Number"]).trim() === orderNo);
+    if(found){
+      const keyMatch = Object.keys(found).find(k => k.toLowerCase() === lc);
+      txt = keyMatch ? String(found[keyMatch]||"") : "";
+    } else {
+      txt = "";
+    }
+  } else {
+    txt = "";
+  }
+}
+
+      // logika khusus Include & Exclude
+      if (lc === "include" || lc === "exclude") {
+        const orderIdx = getIndex(headers,"order number");
+        const orderVal = orderIdx >= 0 ? r[orderIdx] : "";
+        const orderNo = (orderVal === undefined || orderVal === null) ? "" : String(orderVal).trim();
+
+        const found = mData.find(d => String(d["Order Number"]).trim() === orderNo);
+
+        const monthVal = found && found["Month"] ? String(found["Month"]).trim() : "";
+        const remanVal = found && found["Reman"] ? String(found["Reman"]).trim().toLowerCase() : "";
+        const costVal = r[getIndex(headers,"cost")] ? parseFloat(String(r[getIndex(headers,"cost")]).replace(/[^0-9.-]/g,"")) : 0;
+        const orderTypeVal = found && found["Order Type"] ? String(found["Order Type"]).trim() : "";
+
+        if (lc === "include") {
+          if (monthVal) {
+            if (remanVal.includes("reman")) {
+              txt = (costVal * 0.25).toFixed(0);
+            } else {
+              txt = costVal.toFixed(0);
+            }
+          } else {
+            txt = "";
+          }
+        }
+
+        if (lc === "exclude") {
+          if (monthVal) {
+            if (orderTypeVal === "PM38") {
+              txt = "";
+            } else {
+              if (remanVal.includes("reman")) {
+                txt = (costVal * 0.25).toFixed(0);
+              } else {
+                txt = costVal.toFixed(0);
+              }
+            }
+          } else {
+            txt = "";
+          }
+        }
+      }
+
+      const td = document.createElement('td');
+      td.textContent = txt;
+      applyStyleToTd(td, col, txt);
+      row.appendChild(td);
+    });
+
+    frag.appendChild(row);
+  });
+
+  tbody.appendChild(frag);
+  tableEl.appendChild(tbody);
+}
+
+// ================= Filter Menu 1 =================
+function applyWorkFilters(){
+  const fRoom=(document.getElementById('w-filter-room').value||'').toLowerCase();
+  const fOrder=(document.getElementById('w-filter-order').value||'').toLowerCase();
+  const fMat=(document.getElementById('w-filter-mat').value||'').toLowerCase();
+  const fSection=(document.getElementById('w-filter-section').value||'').toLowerCase();
+  const fCph=(document.getElementById('w-filter-cph').value||'').toLowerCase();
+  const fStatus=(document.getElementById('w-filter-status').value||'').toLowerCase();
+  if(!wTable.tBodies[0]) return;
+  const rows=Array.from(wTable.tBodies[0].rows);
+  const idxRoom=getIndex(wHeaders,'room');
+  const idxOrder=getIndex(wHeaders,'order number');
+  const idxMat=getIndex(wHeaders,'mat');
+  const idxSection=getIndex(wHeaders,'section');
+  const idxCph=getIndex(wHeaders,'cph');
+  const idxStatus=getIndex(wHeaders,'status');
+  rows.forEach(row=>{
+    let show=true;
+    const txtOrder=idxOrder>=0?(row.cells[idxOrder]?.textContent.toLowerCase()||""):"";
+    if(fRoom&&idxRoom>=0 && !(row.cells[idxRoom]?.textContent.toLowerCase()||'').includes(fRoom)) show=false;
+    if(show&&fOrder&&idxOrder>=0 && !txtOrder.includes(fOrder)) show=false;
+    if(show&&fMat&&idxMat>=0 && !(row.cells[idxMat]?.textContent.toLowerCase()||'').includes(fMat)) show=false;
+    if(show&&fSection&&idxSection>=0 && !(row.cells[idxSection]?.textContent.toLowerCase()||'').includes(fSection)) show=false;
+    if(show&&fCph&&idxCph>=0 && !(row.cells[idxCph]?.textContent.toLowerCase()||'').includes(fCph)) show=false;
+    if(show&&fStatus&&idxStatus>=0 && !(row.cells[idxStatus]?.textContent.toLowerCase()||'').includes(fStatus)) show=false;
+    row.style.display=show?'':'none';
+  });
+}
+document.querySelectorAll("#panel-work .filter-container input[type=text]")
+  .forEach(inp=>inp.addEventListener('input',debounce(applyWorkFilters,120)));
+document.getElementById('w-clear').addEventListener('click',()=>{
+  document.querySelectorAll("#panel-work .filter-container input[type=text]").forEach(i=>i.value='');
+  applyWorkFilters();
+});
+
+// ================= Build Table Menu 2 =================
+function buildManualTable() {
+  const table = document.getElementById("m-table");
+  while (table.firstChild) table.removeChild(table.firstChild);
+
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  mHeaders.forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  mData.forEach((row, rowIndex) => {
+    const tr = document.createElement("tr");
+    mHeaders.forEach(h => {
+      const td = document.createElement("td");
+      if (h === "Action") {
+        const btn = document.createElement("button");
+        btn.textContent = "Delete";
+        btn.addEventListener("click", () => {
+          mData.splice(rowIndex, 1);
+          buildManualTable();
+          updateWorkTable();  
+        });
+        td.appendChild(btn);
+      } else {
+        td.contentEditable = true;
+        td.textContent = row[h] || "";
+        td.addEventListener("input", e => {
+          row[h] = e.target.textContent;
+          debouncedUpdateWorkTable();   // pakai debounce
+        });
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+}
+
+// ================= Menu 2 Helper =================
+function updateWorkTable() {
+  if (!wHeaders || wHeaders.length === 0 || !Array.isArray(wData)) return;
+  const rows = wData.map(r => wHeaders.map(h => r[h]));
+  buildTableFromJson(wTable, wHeaders, rows);
+  applyWorkFilters();
+}
+
+// ================= Menu 2 Actions =================
+document.getElementById("m-add").addEventListener("click", () => {
+  const input = document.getElementById("m-input-orders").value;
+  const orders = input.split(/\s+/).map(o => String(o).trim()).filter(o => o);
+
+  orders.forEach(order => {
+    let found = null;
+    if (Array.isArray(wData)) {
+      found = wData.find(d =>
+        String(d["Order Number"] || "").trim() === order
+      );
+    }
+
+    mData.push({
+      Room: found && found["Room"] ? String(found["Room"]).trim() : "",
+      "Order Type": found && (found["Order Type"] || found["PM Type"])
+        ? String(found["Order Type"] || found["PM Type"]).trim()
+        : "",
+      "Order Number": String(order).trim(),
+      Description: found && found["Description"] ? String(found["Description"]).trim() : "",
+      MAT: found && found["MAT"] ? String(found["MAT"]).trim() : "",
+      Month: found && found["Month"] ? String(found["Month"]).trim() : "",
+      Reman: found && found["Reman"] ? String(found["Reman"]).trim() : "",
+      Cost: found && found["Cost"] ? String(found["Cost"]).trim() : ""
+    });
+  });
+
+  buildManualTable();
+  updateWorkTable();
+  document.getElementById("m-input-orders").value = "";
+});
+
+document.getElementById("m-clear").addEventListener("click",()=>{
+  document.querySelectorAll("#panel-manual .filter-container input[type=text]").forEach(i=>i.value='');
+  applyManualFilters();
+});
+document.getElementById("m-save").addEventListener("click",()=>{
+  const blob=new Blob([JSON.stringify(mData,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="manual.json";
+  a.click();
+});
+document.getElementById("m-load").addEventListener("change",function(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{mData=JSON.parse(ev.target.result);}catch(err){alert("Invalid JSON");return;}
+    buildManualTable();
+    updateWorkTable();
+  };
+  reader.readAsText(file);
+});
+
+// ================= Filter Menu 2 =================
+function applyManualFilters(){
+  const fRoom=(document.getElementById('m-filter-room').value||'').toLowerCase();
+  const fOrder=(document.getElementById('m-filter-order').value||'').toLowerCase();
+  const fDesc=(document.getElementById('m-filter-description').value||'').toLowerCase();
+  const fMat=(document.getElementById('m-filter-mat').value||'').toLowerCase();
+  const fMonth=(document.getElementById('m-filter-month').value||'').toLowerCase();
+  const fReman=(document.getElementById('m-filter-reman').value||'').toLowerCase();
+  if(!mTable.tBodies[0]) return;
+  const rows=Array.from(mTable.tBodies[0].rows);
+  const idxRoom=mHeaders.indexOf("Room");
+  const idxOrder=mHeaders.indexOf("Order Number");
+  const idxDesc=mHeaders.indexOf("Description");
+  const idxMat=mHeaders.indexOf("MAT");
+  const idxMonth=mHeaders.indexOf("Month");
+  const idxReman=mHeaders.indexOf("Reman");
+  rows.forEach(row=>{
+    let show=true;
+    if(fRoom && !(row.cells[idxRoom]?.textContent.toLowerCase()||'').includes(fRoom)) show=false;
+    if(show&&fOrder && !(row.cells[idxOrder]?.textContent.toLowerCase()||'').includes(fOrder)) show=false;
+    if(show&&fDesc && !(row.cells[idxDesc]?.textContent.toLowerCase()||'').includes(fDesc)) show=false;
+    if(show&&fMat && !(row.cells[idxMat]?.textContent.toLowerCase()||'').includes(fMat)) show=false;
+    if(show&&fMonth && !(row.cells[idxMonth]?.textContent.toLowerCase()||'').includes(fMonth)) show=false;
+    if(show&&fReman && !(row.cells[idxReman]?.textContent.toLowerCase()||'').includes(fReman)) show=false;
+    row.style.display=show?'':'none';
+  });
+}
+document.querySelectorAll("#panel-manual .filter-container input[type=text]")
+  .forEach(inp=>inp.addEventListener('input',debounce(applyManualFilters,120)));
+
+</script>
+</body>
+</html>
