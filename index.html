@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -33,6 +32,7 @@ td.duplicate { background-color: orange !important; }
 <div class="tabs">
   <div class="tab active" id="tab-work">Work Order</div>
   <div class="tab" id="tab-manual">List Manual</div>
+  <div class="tab" id="tab-order">Order MP</div>
 </div>
 
 <!-- PANEL 1: Work Order -->
@@ -72,6 +72,34 @@ td.duplicate { background-color: orange !important; }
   <table id="m-table" class="small"></table>
 </div>
 
+<!-- PANEL 3: Order MP -->
+<div class="panel" id="panel-order">
+  <div class="filter-container">
+    <label>Room: <input type="text" id="o-filter-room" placeholder="filter Room"></label>
+    <label>Order: <input type="text" id="o-filter-order" placeholder="filter Order"></label>
+    <label>MAT: <input type="text" id="o-filter-mat" placeholder="filter MAT"></label>
+    <label>Section: <input type="text" id="o-filter-section" placeholder="filter Section"></label>
+    <label>CPH: <input type="text" id="o-filter-cph" placeholder="filter CPH"></label>
+    <label>Status: <input type="text" id="o-filter-status" placeholder="filter Status"></label>
+
+    <label style="margin-left:12px;">Month:
+      <select id="o-month" multiple size="4" style="vertical-align:middle;">
+        <option value="sep">Sep</option>
+        <option value="oct">Oct</option>
+        <option value="nov">Nov</option>
+        <option value="dec">Dec</option>
+      </select>
+    </label>
+
+    <div class="controls" style="margin-top:8px;">
+      <button class="btn" id="o-clear">Clear filters</button>
+      <button class="btn" id="o-load">Load Data</button>
+    </div>
+  </div>
+
+  <table id="o-table" class="small"></table>
+</div>
+
 <script>
 // ================= Helpers =================
 function formatDateFromSerialOrDate(v){
@@ -106,7 +134,7 @@ function applyStyleToTd(td, col, val){
     if(v==="Complete"){td.style.backgroundColor="green";td.style.color="white";}
     else if(v==="Not Complete"){td.style.backgroundColor="red";td.style.color="white";}
   } else if(c==="aging"){
-    const a=parseInt(v,10); 
+    const a=parseInt(v,10);
     if(!isNaN(a)){td.style.backgroundColor=(a<=30)?"green":"red";td.style.color="white";}
   } else if(c==="status amt"){
     if(v==="O"){td.style.backgroundColor="lightgray";td.style.color="black";}
@@ -133,8 +161,32 @@ function clearSortIndicators(t){
 function debounce(fn,wait){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),wait);};}
 function getIndex(headers,keyword){keyword=(keyword||'').toLowerCase();return headers.findIndex(h=>(h||'').toLowerCase().includes(keyword));}
 
-// debounce khusus untuk updateWorkTable
-const debouncedUpdateWorkTable = debounce(updateWorkTable, 300);
+// ===== Add missing sortTableByIndex so header clicks won't error =====
+function sortTableByIndex(tableEl, colIndex, th){
+  if(!tableEl || !tableEl.tBodies[0]) return;
+  const tbody = tableEl.tBodies[0];
+  const rows = Array.from(tbody.rows);
+  // toggle direction
+  const current = th && th.dataset && th.dataset.sorted ? th.dataset.sorted : null;
+  const dir = current === 'asc' ? 'desc' : 'asc';
+  clearSortIndicators(tableEl);
+  if(th){
+    th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    th.dataset.sorted = dir;
+  }
+  rows.sort((a,b)=>{
+    const aText = a.cells[colIndex]?.textContent || '';
+    const bText = b.cells[colIndex]?.textContent || '';
+    const A = parseValueForSort(aText);
+    const B = parseValueForSort(bText);
+    if (A < B) return dir === 'asc' ? -1 : 1;
+    if (A > B) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+  const frag = document.createDocumentFragment();
+  rows.forEach(r=>frag.appendChild(r));
+  tbody.appendChild(frag);
+}
 
 // ================= Tab Switch =================
 const tabs=document.querySelectorAll('.tab');const panels=document.querySelectorAll('.panel');
@@ -153,6 +205,8 @@ let wHeaders=[]; let wData=[]; const wTable=document.getElementById('w-table');
 let mHeaders=["Room","Order Type","Order Number","Description","MAT","Month","Reman","Cost","Action"];
 let mData=[]; const mTable=document.getElementById("m-table");
 
+// debounce placeholder for updateWorkTable (assigned later)
+let debouncedUpdateWorkTable = null;
 
 // ================= Upload Excel Menu 1 =================
 document.getElementById('w-upload').addEventListener('change',function(e){
@@ -171,10 +225,10 @@ document.getElementById('w-upload').addEventListener('change',function(e){
   };
   reader.readAsArrayBuffer(f);
 });
-// ================= Build Table Menu 1 =================
+
+// ================= Build Table (used by Menu1 + Menu3) =================
 function buildTableFromJson(tableEl, headers, rows) {
   while (tableEl.firstChild) tableEl.removeChild(tableEl.firstChild);
-
   const thead = document.createElement('thead');
   const tr = document.createElement('tr');
   headers.forEach((h, i) => {
@@ -184,97 +238,68 @@ function buildTableFromJson(tableEl, headers, rows) {
     th.addEventListener('click', () => sortTableByIndex(tableEl, i, th));
     tr.appendChild(th);
   });
-  thead.appendChild(tr);
-  tableEl.appendChild(thead);
-
+  thead.appendChild(tr); tableEl.appendChild(thead);
   const tbody = document.createElement('tbody');
   const frag = document.createDocumentFragment();
-
   rows.forEach(r => {
     const row = document.createElement('tr');
-
     headers.forEach((col, i) => {
       let raw = (r[i] !== undefined && r[i] !== null) ? r[i] : "";
       let txt = "";
       const lc = String(col || "").toLowerCase();
-
-      if (["created on","planning","target date","end date"].includes(lc)) {
-        txt = formatDateFromSerialOrDate(raw);
-      } else if (["cost"].includes(lc)) {
-        txt = formatCurrency(raw);
-      } else {
-        txt = String(raw);
+      if (["created on","planning","target date","end date"].includes(lc)) txt = formatDateFromSerialOrDate(raw);
+      else if (["cost"].includes(lc)) txt = formatCurrency(raw);
+      else txt = String(raw);
+      // lookup Month & Reman from mData when rendering table
+      if (lc === "month" || lc === "reman") {
+        const orderIdx = getIndex(headers, "order number");
+        const orderVal = orderIdx >= 0 ? r[orderIdx] : "";
+        const orderNo = (orderVal === undefined || orderVal === null) ? "" : String(orderVal).trim();
+        if(orderNo){
+          const found = mData.find(d => String(d["Order Number"]).trim() === orderNo);
+          if(found){
+            const keyMatch = Object.keys(found).find(k => k.toLowerCase() === lc);
+            txt = keyMatch ? String(found[keyMatch]||"") : "";
+          } else {
+            txt = "";
+          }
+        } else {
+          txt = "";
+        }
       }
-
- // lookup khusus: hanya Month & Reman dari mData
-if (lc === "month" || lc === "reman") {
-  const orderIdx = getIndex(headers, "order number");
-  const orderVal = orderIdx >= 0 ? r[orderIdx] : "";
-  const orderNo = (orderVal === undefined || orderVal === null) ? "" : String(orderVal).trim();
-  if(orderNo){
-    const found = mData.find(d => String(d["Order Number"]).trim() === orderNo);
-    if(found){
-      const keyMatch = Object.keys(found).find(k => k.toLowerCase() === lc);
-      txt = keyMatch ? String(found[keyMatch]||"") : "";
-    } else {
-      txt = "";
-    }
-  } else {
-    txt = "";
-  }
-}
-
-      // logika khusus Include & Exclude
+      // Include / Exclude logic (kept as original)
       if (lc === "include" || lc === "exclude") {
         const orderIdx = getIndex(headers,"order number");
         const orderVal = orderIdx >= 0 ? r[orderIdx] : "";
         const orderNo = (orderVal === undefined || orderVal === null) ? "" : String(orderVal).trim();
-
         const found = mData.find(d => String(d["Order Number"]).trim() === orderNo);
-
         const monthVal = found && found["Month"] ? String(found["Month"]).trim() : "";
         const remanVal = found && found["Reman"] ? String(found["Reman"]).trim().toLowerCase() : "";
         const costVal = r[getIndex(headers,"cost")] ? parseFloat(String(r[getIndex(headers,"cost")]).replace(/[^0-9.-]/g,"")) : 0;
         const orderTypeVal = found && found["Order Type"] ? String(found["Order Type"]).trim() : "";
-
         if (lc === "include") {
           if (monthVal) {
-            if (remanVal.includes("reman")) {
-              txt = (costVal * 0.25).toFixed(0);
-            } else {
-              txt = costVal.toFixed(0);
-            }
-          } else {
-            txt = "";
-          }
+            if (remanVal.includes("reman")) { txt = (costVal * 0.25).toFixed(0); }
+            else { txt = costVal.toFixed(0); }
+          } else { txt = ""; }
         }
-
         if (lc === "exclude") {
           if (monthVal) {
-            if (orderTypeVal === "PM38") {
-              txt = "";
-            } else {
-              if (remanVal.includes("reman")) {
-                txt = (costVal * 0.25).toFixed(0);
-              } else {
-                txt = costVal.toFixed(0);
-              }
+            if (orderTypeVal === "PM38") { txt = ""; }
+            else {
+              if (remanVal.includes("reman")) { txt = (costVal * 0.25).toFixed(0); }
+              else { txt = costVal.toFixed(0); }
             }
-          } else {
-            txt = "";
-          }
+          } else { txt = ""; }
         }
       }
-
       const td = document.createElement('td');
       td.textContent = txt;
       applyStyleToTd(td, col, txt);
       row.appendChild(td);
     });
-
     frag.appendChild(row);
   });
-
   tbody.appendChild(frag);
   tableEl.appendChild(tbody);
 }
@@ -307,12 +332,8 @@ function applyWorkFilters(){
     row.style.display=show?'':'none';
   });
 }
-document.querySelectorAll("#panel-work .filter-container input[type=text]")
-  .forEach(inp=>inp.addEventListener('input',debounce(applyWorkFilters,120)));
-document.getElementById('w-clear').addEventListener('click',()=>{
-  document.querySelectorAll("#panel-work .filter-container input[type=text]").forEach(i=>i.value='');
-  applyWorkFilters();
-});
+document.querySelectorAll("#panel-work .filter-container input[type=text]").forEach(inp=>inp.addEventListener('input',debounce(applyWorkFilters,120)));
+document.getElementById('w-clear').addEventListener('click',()=>{document.querySelectorAll("#panel-work .filter-container input[type=text]").forEach(i=>i.value='');applyWorkFilters();});
 
 // ================= Build Table Menu 2 =================
 function buildManualTable() {
@@ -340,7 +361,7 @@ function buildManualTable() {
         btn.addEventListener("click", () => {
           mData.splice(rowIndex, 1);
           buildManualTable();
-          updateWorkTable();  
+          updateWorkTable();
         });
         td.appendChild(btn);
       } else {
@@ -348,7 +369,7 @@ function buildManualTable() {
         td.textContent = row[h] || "";
         td.addEventListener("input", e => {
           row[h] = e.target.textContent;
-          debouncedUpdateWorkTable();   // pakai debounce
+          if(typeof debouncedUpdateWorkTable === 'function') debouncedUpdateWorkTable();
         });
       }
       tr.appendChild(td);
@@ -366,6 +387,7 @@ function updateWorkTable() {
   buildTableFromJson(wTable, wHeaders, rows);
   applyWorkFilters();
 }
+debouncedUpdateWorkTable = debounce(updateWorkTable, 300);
 
 // ================= Menu 2 Actions =================
 document.getElementById("m-add").addEventListener("click", () => {
@@ -399,27 +421,9 @@ document.getElementById("m-add").addEventListener("click", () => {
   document.getElementById("m-input-orders").value = "";
 });
 
-document.getElementById("m-clear").addEventListener("click",()=>{
-  document.querySelectorAll("#panel-manual .filter-container input[type=text]").forEach(i=>i.value='');
-  applyManualFilters();
-});
-document.getElementById("m-save").addEventListener("click",()=>{
-  const blob=new Blob([JSON.stringify(mData,null,2)],{type:"application/json"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download="manual.json";
-  a.click();
-});
-document.getElementById("m-load").addEventListener("change",function(e){
-  const file=e.target.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    try{mData=JSON.parse(ev.target.result);}catch(err){alert("Invalid JSON");return;}
-    buildManualTable();
-    updateWorkTable();
-  };
-  reader.readAsText(file);
-});
+document.getElementById("m-clear").addEventListener("click",()=>{document.querySelectorAll("#panel-manual .filter-container input[type=text]").forEach(i=>i.value='');applyManualFilters();});
+document.getElementById("m-save").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(mData,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="manual.json";a.click();});
+document.getElementById("m-load").addEventListener("change",function(e){const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=function(ev){try{mData=JSON.parse(ev.target.result);}catch(err){alert("Invalid JSON");return;} buildManualTable(); updateWorkTable();}; reader.readAsText(file);});
 
 // ================= Filter Menu 2 =================
 function applyManualFilters(){
@@ -448,8 +452,116 @@ function applyManualFilters(){
     row.style.display=show?'':'none';
   });
 }
-document.querySelectorAll("#panel-manual .filter-container input[type=text]")
-  .forEach(inp=>inp.addEventListener('input',debounce(applyManualFilters,120)));
+document.querySelectorAll("#panel-manual .filter-container input[type=text]").forEach(inp=>inp.addEventListener('input',debounce(applyManualFilters,120)));
+
+// ================= Menu 3: Order MP =================
+// NOTE: Menu 1 & Menu 2 logic above is untouched. Menu 3 only reads wData + mData.
+// It uses a month multi-select and will load only rows where Month (from wData or fallback via mData lookup) matches selected month(s).
+
+(function(){
+  const oTable = document.getElementById('o-table');
+
+  function normMonthRaw(v){
+    if(v===undefined || v===null) return '';
+    const s = String(v).trim().toLowerCase();
+    if(!s) return '';
+    if(s.startsWith('sep')) return 'sep';
+    if(s.startsWith('oct')) return 'oct';
+    if(s.startsWith('nov')) return 'nov';
+    if(s.startsWith('dec')) return 'dec';
+    return s.substring(0,3);
+  }
+
+  function getSelectedMonths(){
+    const sel = Array.from(document.getElementById('o-month').selectedOptions)
+                     .map(o => String(o.value||'').toLowerCase().substring(0,3))
+                     .filter(Boolean);
+    return sel;
+  }
+
+  function updateOrderMPTable(){
+    if(!Array.isArray(wHeaders) || wHeaders.length===0 || !Array.isArray(wData)){
+      alert("Please upload Work Order Excel first (Menu 1).");
+      return;
+    }
+
+    const selectedMonths = getSelectedMonths();
+    if(selectedMonths.length === 0){
+      alert("Please select at least one Month before clicking Load Data.");
+      return;
+    }
+
+    const idxMonth = getIndex(wHeaders,'month');
+    const idxOrder = getIndex(wHeaders,'order number');
+    const monthKey = idxMonth >= 0 ? wHeaders[idxMonth] : null;
+    const orderKey = idxOrder >= 0 ? wHeaders[idxOrder] : null;
+
+    const filtered = wData.filter(row => {
+      let rawMonth = monthKey ? row[monthKey] : undefined;
+      if((rawMonth === undefined || rawMonth === null || String(rawMonth).trim() === '') && orderKey && Array.isArray(mData)){
+        const orderNo = String(row[orderKey]||'').trim();
+        if(orderNo){
+          const found = mData.find(d => String(d["Order Number"]||'').trim() === orderNo);
+          if(found){
+            const mk = Object.keys(found).find(k => k.toLowerCase() === 'month');
+            if(mk) rawMonth = found[mk];
+          }
+        }
+      }
+      const norm = normMonthRaw(rawMonth);
+      return norm && selectedMonths.includes(norm);
+    });
+
+    const rows = filtered.map(r => wHeaders.map(h => r[h]));
+    buildTableFromJson(oTable, wHeaders, rows);
+    try { applyOrderFilters(); } catch(e) {}
+  }
+
+  // applyOrderFilters function (used by updateOrderMPTable)
+  function applyOrderFilters() {
+    if(!oTable.tBodies[0]) return;
+    const fRoom=(document.getElementById('o-filter-room').value||'').toLowerCase();
+    const fOrder=(document.getElementById('o-filter-order').value||'').toLowerCase();
+    const fMat=(document.getElementById('o-filter-mat').value||'').toLowerCase();
+    const fSection=(document.getElementById('o-filter-section').value||'').toLowerCase();
+    const fCph=(document.getElementById('o-filter-cph').value||'').toLowerCase();
+    const fStatus=(document.getElementById('o-filter-status').value||'').toLowerCase();
+
+    const rows = Array.from(oTable.tBodies[0].rows);
+    const idxRoom=getIndex(wHeaders,'room');
+    const idxOrder=getIndex(wHeaders,'order number');
+    const idxMat=getIndex(wHeaders,'mat');
+    const idxSection=getIndex(wHeaders,'section');
+    const idxCph=getIndex(wHeaders,'cph');
+    const idxStatus=getIndex(wHeaders,'status');
+
+    rows.forEach(row=>{
+      let show=true;
+      const txtOrder=idxOrder>=0?(row.cells[idxOrder]?.textContent.toLowerCase()||""):"";
+      if(fRoom && idxRoom>=0 && !(row.cells[idxRoom]?.textContent.toLowerCase()||'').includes(fRoom)) show=false;
+      if(show && fOrder && idxOrder>=0 && !txtOrder.includes(fOrder)) show=false;
+      if(show && fMat && idxMat>=0 && !(row.cells[idxMat]?.textContent.toLowerCase()||'').includes(fMat)) show=false;
+      if(show && fSection && idxSection>=0 && !(row.cells[idxSection]?.textContent.toLowerCase()||'').includes(fSection)) show=false;
+      if(show && fCph && idxCph>=0 && !(row.cells[idxCph]?.textContent.toLowerCase()||'').includes(fCph)) show=false;
+      if(show && fStatus && idxStatus>=0 && !(row.cells[idxStatus]?.textContent.toLowerCase()||'').includes(fStatus)) show=false;
+      row.style.display = show ? '' : 'none';
+    });
+  }
+
+  // wire up UI
+  document.querySelectorAll("#panel-order .filter-container input[type=text]").forEach(inp=>
+    inp.addEventListener('input',debounce(()=>{ try{ applyOrderFilters(); }catch(e){} },120))
+  );
+
+  document.getElementById('o-clear').addEventListener('click', () => {
+    document.querySelectorAll("#panel-order .filter-container input[type=text]").forEach(i => i.value = '');
+    Array.from(document.getElementById('o-month').options).forEach(opt => opt.selected = false);
+    try{ applyOrderFilters(); }catch(e){}
+  });
+
+  document.getElementById('o-load').addEventListener('click', updateOrderMPTable);
+
+})(); // end IIFE for Menu 3
 
 </script>
 </body>
