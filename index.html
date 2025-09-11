@@ -78,6 +78,7 @@
 <div id="menu3" class="menu">
   <h3>List Order MP</h3>
   <button class="btn" onclick="loadListMP()">🔄 Load Data</button>
+  <button class="btn" onclick="downloadExcel3()">📥 Download Excel</button>
   <select id="monthFilter" onchange="filterByMonth()">
     <option value="">-- Pilih Month --</option>
   </select>
@@ -90,15 +91,160 @@
   </div>
   <div id="table3"></div>
 </div>
+	
+<!-- Tambahkan library SheetJS -->
+<script src="https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js"></script>
 
 <!-- Menu 4 -->
 <div id="menu4" class="menu">
   <h3>Cost RM</h3>
-  <button class="btn" onclick="generateCalculation()">🔄 Load Data</button>
-  <div id="calc"></div>
+  <button class="btn" onclick="openBudgetPopup()">💰 Input Budget</button>
+  <button class="btn" onclick="generateCostRM()">🔄 Load Tabel</button>
+  <button class="btn" onclick="saveBudgetJSON()">💾 Save JSON</button>
+  <button class="btn" onclick="loadBudgetJSON()">📂 Load JSON</button>
+  <input type="file" id="jsonFileInput" style="display:none;" accept=".json" onchange="handleJSONFile(event)">
+  <div id="costRMContainer" style="margin-top:10px;"></div>
 </div>
 
+<!-- Popup Budget -->
+<div id="budgetPopup" style="display:none; background:#fff; border:1px solid #ccc; padding:10px; width:300px; position:absolute; top:100px; left:50%; transform:translateX(-50%);">
+  <div id="budgetInputs"></div>
+  <button onclick="saveBudget()">Save</button>
+  <button onclick="closeBudgetPopup()">Close</button>
+</div>
+
+<!-- Script -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
+let budgetData = {}; // simpan Budget per CPH
+
+// Buka popup budget
+function openBudgetPopup() {
+  if(!finalData || finalData.length===0){ alert("Gabungkan dulu data di Menu 1!"); return; }
+  const cphList = ["RM","PCR","UCR","TYRE","GET-BBB","BACKLOG","External Job","Fluid","SSA","Other"];
+  const container = document.getElementById("budgetInputs");
+  container.innerHTML = "";
+  cphList.forEach(cph=>{
+    const div = document.createElement("div");
+    div.style.marginBottom = "6px";
+    div.innerHTML = `<label style="width:120px;display:inline-block;text-align:left">${cph}</label>
+                     <input type="number" value="${budgetData[cph]||0}" style="width:100px; text-align:right;" id="budget_${cph}">`;
+    container.appendChild(div);
+  });
+  document.getElementById("budgetPopup").style.display = "block";
+}
+
+// Tutup popup
+function closeBudgetPopup() {
+  document.getElementById("budgetPopup").style.display = "none";
+}
+
+// Simpan input budget ke object
+function saveBudget() {
+  const cphList = ["RM","PCR","UCR","TYRE","GET-BBB","BACKLOG","External Job","Fluid","SSA","Other"];
+  cphList.forEach(cph=>{
+    const val = parseFloat(document.getElementById("budget_"+cph).value) || 0;
+    budgetData[cph] = val;
+  });
+  closeBudgetPopup();
+  alert("Budget berhasil disimpan!");
+}
+
+// Save budget ke file JSON
+function saveBudgetJSON() {
+  if(Object.keys(budgetData).length===0){ alert("Tidak ada data budget untuk disimpan!"); return; }
+  const dataStr = JSON.stringify(budgetData, null, 2);
+  const blob = new Blob([dataStr], {type:"application/json"});
+  const link = document.createElement("a");
+  link.download = "budget.json";
+  link.href = URL.createObjectURL(blob);
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+// Load budget dari file JSON
+function loadBudgetJSON() {
+  document.getElementById("jsonFileInput").click();
+}
+
+// Handler file JSON
+function handleJSONFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const json = JSON.parse(e.target.result);
+      budgetData = json;
+      alert("Budget berhasil di-load dari JSON!");
+    }catch(err){
+      alert("File JSON tidak valid!");
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Fungsi generate tabel
+function generateCostRM() {
+  if(!finalData || finalData.length===0){ alert("Gabungkan dulu data di Menu 1!"); return; }
+  const cphList = ["RM","PCR","UCR","TYRE","GET-BBB","BACKLOG","External Job","Fluid","SSA","Other"];
+  const cols = ["Budget","Include","Exclude","Wheel Type","SE Type","DT Type","Track Type"];
+  const container = document.getElementById("costRMContainer");
+  container.innerHTML = "";
+  const table = document.createElement("table");
+  table.style.borderCollapse = "collapse";
+  table.style.background = "#fff";
+
+  // header
+  const trh = document.createElement("tr");
+  ["CPH", ...cols].forEach(h=>{
+    const th = document.createElement("th");
+    th.textContent = h;
+    th.style.background = "#dfe6e9";
+    th.style.padding = "6px";
+    th.style.border = "1px solid #ccc";
+    th.style.textAlign = "center";
+    th.style.width = h==="CPH"?"120px":"100px";
+    trh.appendChild(th);
+  });
+  table.appendChild(trh);
+
+  // rows
+  cphList.forEach(cph=>{
+    const tr = document.createElement("tr");
+
+    const tdCPH = document.createElement("td");
+    tdCPH.textContent = cph;
+    tdCPH.style.padding = "4px";
+    tdCPH.style.textAlign = "left";
+    tdCPH.style.border = "1px solid #ccc";
+    tr.appendChild(tdCPH);
+
+    const tdBudget = document.createElement("td");
+    tdBudget.style.textAlign = "right";
+    tdBudget.style.padding = "2px";
+    tdBudget.style.border = "1px solid #ccc";
+    tdBudget.textContent = (budgetData[cph]||0).toLocaleString('id-ID');
+    tr.appendChild(tdBudget);
+
+    ["Include","Exclude","Wheel Type","SE Type","DT Type","Track Type"].forEach(col=>{
+      const td = document.createElement("td");
+      td.style.textAlign = "right";
+      td.style.padding = "2px";
+      td.style.border = "1px solid #ccc";
+      if(["Wheel Type","SE Type","DT Type","Track Type"].includes(col)){
+        td.style.background = "#ffeaa7";
+      }
+      td.textContent = "0";
+      tr.appendChild(td);
+    });
+
+    table.appendChild(tr);
+  });
+
+  container.appendChild(table);
+}
+
 /* ===========================
    Data holders (do not change)
    =========================== */
@@ -497,11 +643,11 @@ function updateMonthFilter() {
   select.innerHTML = "<option value=''>-- Pilih Month --</option>" + months.map(m => `<option value="${m}">${m}</option>`).join("");
 }
 
-let filteredData3 = []; // holds current Month-filtered dataset for additional filters
-
 function loadListMP() {
-  if (!finalData || finalData.length === 0) { alert("Jalankan Load Gabungan di Menu 1 terlebih dahulu."); return; }
-  // default show all finalData
+  if (!finalData || finalData.length === 0) { 
+    alert("Jalankan Load Gabungan di Menu 1 terlebih dahulu."); 
+    return; 
+  }
   filteredData3 = finalData.slice();
   renderTableCommon(filteredData3, "table3");
   updateMonthFilter();
@@ -530,18 +676,201 @@ function applyFilter3() {
   renderTableCommon(filtered, "table3");
 }
 
+// ==========================
+// Download Excel untuk Menu 3
+// ==========================
+function downloadExcel3() {
+  if(!filteredData3 || filteredData3.length===0){
+    alert("Tidak ada data untuk di-download!");
+    return;
+  }
+
+  // konversi array object ke worksheet
+  const ws = XLSX.utils.json_to_sheet(filteredData3);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "ListOrderMP");
+
+  // download file
+  XLSX.writeFile(wb, "ListOrderMP.xlsx");
+}
+
 /* ---------------------------
    Menu 4
    --------------------------- */
-function generateCalculation() {
-  if (!finalData || finalData.length === 0) { alert("Gabungkan dulu data di Menu 1!"); return; }
-  const total = finalData.reduce((s, r) => s + (Number(r.Cost) || 0), 0);
-  document.getElementById("calc").innerHTML = `<p><b>Total Cost:</b> ${formatDollar(total)}</p><p><b>Jumlah Data:</b> ${finalData.length}</p>`;
+
+function generateCostRM() {
+  if(!finalData || finalData.length===0){ alert("Gabungkan dulu data di Menu 1!"); return; }
+
+  const cphList = ["RM","PCR","UCR","TYRE","GET-BBB","BACKLOG","External Job","Fluid","SSA","Other"];
+  const cols = ["Budget","Include","Exclude","Wheel Type","SE Type","DT Type","Track Type"];
+  const container = document.getElementById("costRMContainer");
+  container.innerHTML = "";
+
+  const table = document.createElement("table");
+  table.style.width = "100%";
+  table.style.borderCollapse = "collapse";
+  table.style.background = "#fff";
+
+  // header
+  const trh = document.createElement("tr");
+  ["CPH", ...cols].forEach(h=>{
+    const th = document.createElement("th");
+    th.textContent = h;
+    th.style.background = "#dfe6e9";
+    th.style.padding = "6px";
+    th.style.border = "1px solid #ccc";
+    th.style.textAlign = "center";
+    trh.appendChild(th);
+  });
+  table.appendChild(trh);
+
+  const rows = [];
+
+  cphList.forEach(cph=>{
+    const tr = document.createElement("tr");
+
+    const tdCPH = document.createElement("td");
+    tdCPH.textContent = cph;
+    tdCPH.style.padding = "4px";
+    tdCPH.style.textAlign = "left";
+    tdCPH.style.border = "1px solid #ccc";
+    tr.appendChild(tdCPH);
+
+    const rowObj = {CPH:cph};
+
+    cols.forEach(col=>{
+      const td = document.createElement("td");
+      td.style.textAlign = "right";
+      td.style.padding = "2px";
+      td.style.border = "1px solid #ccc"; // border untuk semua cell
+      td.textContent = "0";
+      tr.appendChild(td);
+      rowObj[col] = td;
+    });
+
+    table.appendChild(tr);
+    rows.push(rowObj);
+  });
+
+  // Total row
+  const trTotal = document.createElement("tr");
+  const tdLabelTotal = document.createElement("td");
+  tdLabelTotal.textContent = "Total";
+  tdLabelTotal.style.padding = "4px";
+  tdLabelTotal.style.fontWeight = "bold";
+  tdLabelTotal.style.textAlign = "left";
+  tdLabelTotal.style.border = "1px solid #ccc";
+  trTotal.appendChild(tdLabelTotal);
+
+  const tdColsTotal = {};
+  cols.forEach(col=>{
+    const td = document.createElement("td");
+    td.style.textAlign = "right";
+    td.style.padding = "2px";
+    td.style.fontWeight = "bold";
+    td.style.border = "1px solid #ccc";
+    td.textContent = "0";
+    trTotal.appendChild(td);
+    tdColsTotal[col] = td;
+  });
+  table.appendChild(trTotal);
+
+  // Varian row (hanya kolom Exclude)
+  const trVar = document.createElement("tr");
+  const tdLabelVar = document.createElement("td");
+  tdLabelVar.textContent = "Varian";
+  tdLabelVar.style.padding = "4px";
+  tdLabelVar.style.fontWeight = "bold";
+  tdLabelVar.style.textAlign = "left";
+  tdLabelVar.style.border = "1px solid #ccc";
+  trVar.appendChild(tdLabelVar);
+
+  const tdColsVar = {};
+  cols.forEach(col=>{
+    const td = document.createElement("td");
+    td.style.textAlign = "right";
+    td.style.padding = "2px";
+    td.style.fontWeight = "bold";
+    td.style.border = "1px solid #ccc";
+    td.textContent = col==="Exclude" ? "0" : "";
+    trVar.appendChild(td);
+    tdColsVar[col] = td;
+  });
+  table.appendChild(trVar);
+
+  container.appendChild(table);
+
+  // Hitung semua kolom
+  updateCostTable();
+
+  function updateCostTable(){
+    const totals = {};
+    cols.forEach(col=>totals[col]=0);
+
+    rows.forEach(r=>{
+      const cph = r.CPH;
+      let include=0, exclude=0, wheel=0, se=0, dt=0, track=0;
+      const filtered = finalData.filter(f=>String(f.CPH).trim()===cph);
+      filtered.forEach(f=>{
+        const valInclude = parseFloat(f.Include)||0;
+        const valExclude = parseFloat(f.Exclude)||0;
+        include += valInclude;
+        exclude += valExclude;
+      });
+      if(["Fluid","SSA","Other"].includes(cph)){
+        include = budgetData[cph]||0;
+        exclude = budgetData[cph]||0;
+      }
+      filtered.forEach(f=>{
+        const valExclude = parseFloat(f.Exclude)||0;
+        wheel += valExclude; se+=valExclude; dt+=valExclude; track+=valExclude;
+      });
+
+      // assign text
+      r.Budget.textContent = (budgetData[cph]||0).toLocaleString('id-ID');
+      r.Include.textContent = include.toLocaleString('id-ID');
+      r.Exclude.textContent = exclude.toLocaleString('id-ID');
+      r["Wheel Type"].textContent = wheel.toLocaleString('id-ID');
+      r["SE Type"].textContent = se.toLocaleString('id-ID');
+      r["DT Type"].textContent = dt.toLocaleString('id-ID');
+      r["Track Type"].textContent = track.toLocaleString('id-ID');
+
+      // highlight merah jika Include/Exclude > Budget
+      if(include > (budgetData[cph]||0)){
+        r.Include.style.background = "#e74c3c"; r.Include.style.color="#fff";
+      } else { r.Include.style.background=""; r.Include.style.color=""; }
+
+      if(exclude > (budgetData[cph]||0)){
+        r.Exclude.style.background = "#e74c3c"; r.Exclude.style.color="#fff";
+      } else { r.Exclude.style.background=""; r.Exclude.style.color=""; }
+
+      totals.Budget += budgetData[cph]||0;
+      totals.Include += include;
+      totals.Exclude += exclude;
+      totals["Wheel Type"] += wheel;
+      totals["SE Type"] += se;
+      totals["DT Type"] += dt;
+      totals["Track Type"] += track;
+    });
+
+    // assign totals row
+    cols.forEach(col=>{
+      tdColsTotal[col].textContent = totals[col].toLocaleString('id-ID');
+    });
+
+    // varian = Total Budget – Total Exclude (hanya kolom Exclude)
+    const varian = totals.Budget - totals.Exclude;
+    tdColsVar.Exclude.textContent = varian.toLocaleString('id-ID');
+    if(varian < 0){
+      tdColsVar.Exclude.style.background = "#e74c3c";
+      tdColsVar.Exclude.style.color = "#fff";
+    } else {
+      tdColsVar.Exclude.style.background = "";
+      tdColsVar.Exclude.style.color = "";
+    }
+  }
 }
 
-/* initial placeholders (keep menu1/menu2 initial state unchanged) */
-renderOrderTable();
-renderTable1([]);
 </script>
 </body>
 </html>
