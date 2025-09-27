@@ -566,28 +566,16 @@ function loadOrdersFromExcel() {
   alert("Load complete. Matched: " + matched);
 }
 
-
 function recalcIncludeExclude() {
   manualData.forEach(m => {
     const costNum = parseFloat(m.Cost) || 0;
-    const remanVal = String(m.Reman || "").trim().toLowerCase();
-    const orderType = String(m["Order Type"] || "").trim();
-
-    if (remanVal === "reman") {
-      // Jika Reman = "reman", Include = 25% dari Cost, Exclude = Include (kecuali PM38)
+    if (String(m.Reman || "").trim().toLowerCase() === "reman") {
       m.Include = (costNum * 0.25).toFixed(1);
-      m.Exclude = (orderType === "PM38") ? "" : m.Include;
-    } else if (remanVal === "pwo") {
-      // Jika Reman = "pwo", Include kosong, Exclude = full Cost
-      m.Include = "";
-      m.Exclude = costNum ? costNum.toFixed(1) : "";
     } else {
-      // Default: Include = full Cost, Exclude = Include (kecuali PM38)
       m.Include = costNum ? costNum.toFixed(1) : "";
-      m.Exclude = (orderType === "PM38") ? "" : m.Include;
     }
+    m.Exclude = (String(m["Order Type"] || "").trim() === "PM38") ? "" : (m.Include || "");
   });
-
   renderOrderTable();
 }
 
