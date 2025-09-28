@@ -37,7 +37,7 @@
   <button class="active" onclick="showMenu('menu1', this)">Data Order</button>
   <button onclick="showMenu('menu2', this)">Add Order MP</button>
   <button onclick="showMenu('menu3', this)">List Order MP</button>
-  <button onclick="showMenu('menu4', this)">Cost RM</button>
+  <button onclick="showMenu('menu4', this)">Marge</button>
 </nav>
 
 <!-- Menu 1 -->
@@ -95,22 +95,39 @@
 <!-- Tambahkan library SheetJS -->
 <script src="https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js"></script>
 
-<!-- Menu 4 -->
+<!-- MENU 4 -->
 <div id="menu4" class="menu">
-  <h3>Cost RM</h3>
-  <button class="btn" onclick="openBudgetPopup()">💰 Input Budget</button>
-  <button class="btn" onclick="generateCostRM()">🔄 Load Tabel</button>
-  <button class="btn" onclick="saveBudgetJSON()">💾 Save JSON</button>
-  <button class="btn" onclick="loadBudgetJSON()">📂 Load JSON</button>
-  <input type="file" id="jsonFileInput" style="display:none;" accept=".json" onchange="handleJSONFile(event)">
-  <div id="costRMContainer" style="margin-top:10px;"></div>
-</div>
+  <h2>Menu 4 : Merge</h2>
+  <div class="panel" id="panel-json" data-hidden="false">
+    <button id="toggleJson">⬆ Hide</button>
+    <div class="panel-content">
+      <p>Upload sampai 5 file JSON untuk digabung:</p>
+      <input type="file" id="json1" accept=".json"><br>
+      <input type="file" id="json2" accept=".json"><br>
+      <input type="file" id="json3" accept=".json"><br>
+      <input type="file" id="json4" accept=".json"><br>
+      <input type="file" id="json5" accept=".json"><br>
+      <div style="margin-top:8px;">
+        <button class="btn btn-primary" onclick="mergeJson()">Gabungkan</button>
+        <button class="btn btn-success" onclick="downloadJson()">Download JSON</button>
+      </div>
+    </div>
+  </div>
 
-<!-- Popup Budget -->
-<div id="budgetPopup" style="display:none; background:#fff; border:1px solid #ccc; padding:10px; width:300px; position:absolute; top:100px; left:50%; transform:translateX(-50%);">
-  <div id="budgetInputs"></div>
-  <button onclick="saveBudget()">Save</button>
-  <button onclick="closeBudgetPopup()">Close</button>
+<!-- FILTER: dropdown kolom + input -->
+  <div style="display:flex; gap:8px; margin:10px 0; align-items:center;">
+    <select id="filterColumn" onchange="filterTable()" style="flex:0 0 120px; padding:4px;">
+      <option value="">--Pilih kolom--</option>
+      <!-- Opsi akan diisi otomatis oleh renderTable() -->
+    </select>
+
+    <input type="text" id="searchInput" placeholder="Masukkan nilai filter..." 
+           oninput="filterTable()" 
+           style="flex:1; padding:4px;">
+  </div>
+
+  <!-- Tabel hasil merge -->
+  <div id="tableJson"></div>
 </div>
 
 <!-- Script -->
@@ -694,182 +711,184 @@ function downloadExcel3() {
   XLSX.writeFile(wb, "ListOrderMP.xlsx");
 }
 
-/* ---------------------------
-   Menu 4
-   --------------------------- */
+// Toggle panel JSON
+document.getElementById('toggleJson').addEventListener('click', () => {
+  const panel = document.getElementById('panel-json');
+  const content = panel.querySelector('.panel-content');
+  const hidden = panel.getAttribute('data-hidden') === 'true';
+  if (hidden) {
+    content.style.display = 'block';
+    panel.setAttribute('data-hidden', 'false');
+    document.getElementById('toggleJson').textContent = '⬆ Hide';
+  } else {
+    content.style.display = 'none';
+    panel.setAttribute('data-hidden', 'true');
+    document.getElementById('toggleJson').textContent = '⬇ Show';
+  }
+});
 
-function generateCostRM() {
-  if(!finalData || finalData.length===0){ alert("Gabungkan dulu data di Menu 1!"); return; }
+window.mergedData = [];
+let currentSort = { key: null, asc: true };
 
-  const cphList = ["RM","PCR","UCR","TYRE","GET-BBB","BACKLOG","External Job","Fluid","SSA","Other"];
-  const cols = ["Budget","Include","Exclude","Wheel Type","SE Type","DT Type","Track Type"];
-  const container = document.getElementById("costRMContainer");
-  container.innerHTML = "";
+// Merge JSON
+async function mergeJson() {
+  const allData = [];
 
-  const table = document.createElement("table");
-  table.style.width = "100%";
-  table.style.borderCollapse = "collapse";
-  table.style.background = "#fff";
-
-  // header
-  const trh = document.createElement("tr");
-  ["CPH", ...cols].forEach(h=>{
-    const th = document.createElement("th");
-    th.textContent = h;
-    th.style.background = "#dfe6e9";
-    th.style.padding = "6px";
-    th.style.border = "1px solid #ccc";
-    th.style.textAlign = "center";
-    trh.appendChild(th);
-  });
-  table.appendChild(trh);
-
-  const rows = [];
-
-  cphList.forEach(cph=>{
-    const tr = document.createElement("tr");
-
-    const tdCPH = document.createElement("td");
-    tdCPH.textContent = cph;
-    tdCPH.style.padding = "4px";
-    tdCPH.style.textAlign = "left";
-    tdCPH.style.border = "1px solid #ccc";
-    tr.appendChild(tdCPH);
-
-    const rowObj = {CPH:cph};
-
-    cols.forEach(col=>{
-      const td = document.createElement("td");
-      td.style.textAlign = "right";
-      td.style.padding = "2px";
-      td.style.border = "1px solid #ccc"; // border untuk semua cell
-      td.textContent = "0";
-      tr.appendChild(td);
-      rowObj[col] = td;
-    });
-
-    table.appendChild(tr);
-    rows.push(rowObj);
-  });
-
-  // Total row
-  const trTotal = document.createElement("tr");
-  const tdLabelTotal = document.createElement("td");
-  tdLabelTotal.textContent = "Total";
-  tdLabelTotal.style.padding = "4px";
-  tdLabelTotal.style.fontWeight = "bold";
-  tdLabelTotal.style.textAlign = "left";
-  tdLabelTotal.style.border = "1px solid #ccc";
-  trTotal.appendChild(tdLabelTotal);
-
-  const tdColsTotal = {};
-  cols.forEach(col=>{
-    const td = document.createElement("td");
-    td.style.textAlign = "right";
-    td.style.padding = "2px";
-    td.style.fontWeight = "bold";
-    td.style.border = "1px solid #ccc";
-    td.textContent = "0";
-    trTotal.appendChild(td);
-    tdColsTotal[col] = td;
-  });
-  table.appendChild(trTotal);
-
-  // Varian row (hanya kolom Exclude)
-  const trVar = document.createElement("tr");
-  const tdLabelVar = document.createElement("td");
-  tdLabelVar.textContent = "Varian";
-  tdLabelVar.style.padding = "4px";
-  tdLabelVar.style.fontWeight = "bold";
-  tdLabelVar.style.textAlign = "left";
-  tdLabelVar.style.border = "1px solid #ccc";
-  trVar.appendChild(tdLabelVar);
-
-  const tdColsVar = {};
-  cols.forEach(col=>{
-    const td = document.createElement("td");
-    td.style.textAlign = "right";
-    td.style.padding = "2px";
-    td.style.fontWeight = "bold";
-    td.style.border = "1px solid #ccc";
-    td.textContent = col==="Exclude" ? "0" : "";
-    trVar.appendChild(td);
-    tdColsVar[col] = td;
-  });
-  table.appendChild(trVar);
-
-  container.appendChild(table);
-
-  // Hitung semua kolom
-  updateCostTable();
-
-  function updateCostTable(){
-    const totals = {};
-    cols.forEach(col=>totals[col]=0);
-
-    rows.forEach(r=>{
-      const cph = r.CPH;
-      let include=0, exclude=0, wheel=0, se=0, dt=0, track=0;
-      const filtered = finalData.filter(f=>String(f.CPH).trim()===cph);
-      filtered.forEach(f=>{
-        const valInclude = parseFloat(f.Include)||0;
-        const valExclude = parseFloat(f.Exclude)||0;
-        include += valInclude;
-        exclude += valExclude;
-      });
-      if(["Fluid","SSA","Other"].includes(cph)){
-        include = budgetData[cph]||0;
-        exclude = budgetData[cph]||0;
+  for (let i = 1; i <= 5; i++) {
+    const inp = document.getElementById('json' + i);
+    if (inp && inp.files && inp.files.length > 0) {
+      try {
+        const text = await inp.files[0].text();
+        const json = JSON.parse(text);
+        if (Array.isArray(json)) allData.push(...json);
+        else allData.push(json);
+      } catch (e) {
+        alert('File JSON ke-' + i + ' tidak valid!\n' + e.message);
+        return;
       }
-      filtered.forEach(f=>{
-        const valExclude = parseFloat(f.Exclude)||0;
-        wheel += valExclude; se+=valExclude; dt+=valExclude; track+=valExclude;
-      });
-
-      // assign text
-      r.Budget.textContent = (budgetData[cph]||0).toLocaleString('id-ID');
-      r.Include.textContent = include.toLocaleString('id-ID');
-      r.Exclude.textContent = exclude.toLocaleString('id-ID');
-      r["Wheel Type"].textContent = wheel.toLocaleString('id-ID');
-      r["SE Type"].textContent = se.toLocaleString('id-ID');
-      r["DT Type"].textContent = dt.toLocaleString('id-ID');
-      r["Track Type"].textContent = track.toLocaleString('id-ID');
-
-      // highlight merah jika Include/Exclude > Budget
-      if(include > (budgetData[cph]||0)){
-        r.Include.style.background = "#e74c3c"; r.Include.style.color="#fff";
-      } else { r.Include.style.background=""; r.Include.style.color=""; }
-
-      if(exclude > (budgetData[cph]||0)){
-        r.Exclude.style.background = "#e74c3c"; r.Exclude.style.color="#fff";
-      } else { r.Exclude.style.background=""; r.Exclude.style.color=""; }
-
-      totals.Budget += budgetData[cph]||0;
-      totals.Include += include;
-      totals.Exclude += exclude;
-      totals["Wheel Type"] += wheel;
-      totals["SE Type"] += se;
-      totals["DT Type"] += dt;
-      totals["Track Type"] += track;
-    });
-
-    // assign totals row
-    cols.forEach(col=>{
-      tdColsTotal[col].textContent = totals[col].toLocaleString('id-ID');
-    });
-
-    // varian = Total Budget – Total Exclude (hanya kolom Exclude)
-    const varian = totals.Budget - totals.Exclude;
-    tdColsVar.Exclude.textContent = varian.toLocaleString('id-ID');
-    if(varian < 0){
-      tdColsVar.Exclude.style.background = "#e74c3c";
-      tdColsVar.Exclude.style.color = "#fff";
-    } else {
-      tdColsVar.Exclude.style.background = "";
-      tdColsVar.Exclude.style.color = "";
     }
   }
+
+  // Hilangkan duplikat
+  const uniqueData = [];
+  const seen = new Set();
+  allData.forEach(item => {
+    const key = JSON.stringify(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueData.push(item);
+    }
+  });
+
+  window.mergedData = uniqueData;
+  renderTable(window.mergedData);
 }
+
+// Render tabel
+function renderTable(data) {
+  window.displayedData = data; // data yang sedang ditampilkan
+  const container = document.getElementById('tableJson');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<p>Tidak ada data untuk ditampilkan.</p>';
+    return;
+  }
+
+  // Hitung duplikat berdasarkan Order
+  const orderCount = {};
+  data.forEach(item => {
+    const order = item.Order || item.order;
+    if (order) orderCount[order] = (orderCount[order] || 0) + 1;
+  });
+
+  let html = '<table border="1" cellpadding="4" cellspacing="0"><thead><tr>';
+  for (const key in data[0]) {
+    html += `<th onclick="sortTable('${key}')">${key} ⬍</th>`;
+  }
+  html += '<th>Action</th></tr></thead><tbody>';
+
+  data.forEach((row, index) => {
+    const order = row.Order || row.order;
+    const isDuplicate = order && orderCount[order] > 1;
+    html += `<tr style="${isDuplicate ? 'background-color:#ffdddd;' : ''}">`;
+    for (const key in row) {
+      html += `<td>${row[key]}</td>`;
+    }
+    html += `<td><button onclick="deleteRow(${index})">Delete</button></td>`;
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  // Isi dropdown filter kolom otomatis
+  const colSelect = document.getElementById('filterColumn');
+  if (colSelect && data.length > 0) {
+    const selected = colSelect.value; // simpan pilihan sebelumnya
+    colSelect.innerHTML = '<option value="">--Pilih kolom--</option>';
+    Object.keys(data[0]).forEach(key => {
+      colSelect.innerHTML += `<option value="${key}" ${selected === key ? 'selected' : ''}>${key}</option>`;
+    });
+  }
+}
+
+// Delete row
+function deleteRow(index) {
+  const itemToDelete = window.displayedData[index];
+  const orderToDelete = itemToDelete.Order || itemToDelete.order;
+
+  const originalIndex = window.mergedData.findIndex(item => {
+    const order = item.Order || item.order;
+    return order === orderToDelete;
+  });
+
+  if (originalIndex !== -1 && confirm('Yakin ingin menghapus baris ini?')) {
+    window.mergedData.splice(originalIndex, 1);
+    renderTable(window.mergedData);
+  }
+}
+
+// Download JSON
+function downloadJson() {
+  if (!window.mergedData || window.mergedData.length === 0) {
+    alert('Tidak ada data untuk di-download');
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(window.mergedData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'merged.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// FILTER berdasarkan kolom
+function filterTable() {
+  const colSelect = document.getElementById('filterColumn');
+  const input = document.getElementById('searchInput');
+  const col = colSelect ? colSelect.value : null;
+  const val = input ? input.value.toLowerCase() : '';
+
+  if (!col || !val) {
+    renderTable(window.mergedData);
+    return;
+  }
+
+  const filtered = window.mergedData.filter(item => {
+    return String(item[col] ?? '').toLowerCase().includes(val);
+  });
+
+  renderTable(filtered);
+}
+
+// Sort tabel
+function sortTable(key) {
+  if (!window.mergedData || window.mergedData.length === 0) return;
+
+  const asc = currentSort.key === key ? !currentSort.asc : true;
+  currentSort = { key, asc };
+
+  window.mergedData.sort((a, b) => {
+    const valA = a[key] ?? '';
+    const valB = b[key] ?? '';
+
+    const numA = parseFloat(valA);
+    const numB = parseFloat(valB);
+
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return asc ? numA - numB : numB - numA;
+    }
+
+    return asc
+      ? String(valA).localeCompare(String(valB))
+      : String(valB).localeCompare(String(valA));
+  });
+
+  renderTable(window.mergedData);
+}
+
+
 
 </script>
 </body>
