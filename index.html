@@ -59,20 +59,28 @@
 <div id="menu2" class="menu">
   <h3>Add Order MP</h3>
   <textarea id="orderList" rows="4" cols="60" placeholder="Paste orders here (one per line)"></textarea><br>
+
+  <!-- Tombol aksi -->
   <button class="btn" onclick="addOrders()">Add Orders</button>
   <button class="btn" onclick="loadOrdersFromExcel()">🔄 Load (match Excel)</button>
   <button class="btn" onclick="recalcIncludeExclude()">🔄 Load Include/Exclude</button>
   <button class="btn" onclick="saveJSON()">💾 Save JSON</button>
+  <button class="btn btn-warning" onclick="clearTable2()">🗑 Clear</button>
+  
   <input type="file" id="loadJSON" style="display:none" accept=".json" onchange="loadJSONFile(event)">
   <button class="btn" onclick="document.getElementById('loadJSON').click()">📂 Load JSON</button>
 
+  <!-- Filter bar -->
   <div class="filter-bar" style="margin-top:8px;">
     <input type="text" id="filterRoom" placeholder="Filter Room" oninput="filterOrders()">
     <input type="text" id="filterOrder" placeholder="Filter Order" oninput="filterOrders()">
     <input type="text" id="filterMAT" placeholder="Filter MAT" oninput="filterOrders()">
   </div>
+
+  <!-- Tabel hasil -->
   <div id="table2"></div>
 </div>
+
 
 <!-- Menu 3 -->
 <div id="menu3" class="menu">
@@ -97,7 +105,7 @@
 
 <!-- MENU 4 -->
 <div id="menu4" class="menu">
-  <h2>Merge</h2>
+  <h2>Menu 4 : Merge</h2>
   <div class="panel" id="panel-json" data-hidden="false">
     <button id="toggleJson">⬆ Hide</button>
     <div class="panel-content">
@@ -628,6 +636,16 @@ function filterOrders() {
     (!mf || String(r.MAT || "").toLowerCase().includes(mf))
   );
   renderOrderTable(filtered);
+}
+function clearTable2() {
+  if (confirm('Yakin ingin menghapus semua data di tabel ini?')) {
+    manualData = [];  // kosongkan data Menu 2
+    document.getElementById('table2').innerHTML = ''; // kosongkan tabel
+    // reset filter input
+    document.getElementById('filterRoom').value = '';
+    document.getElementById('filterOrder').value = '';
+    document.getElementById('filterMAT').value = '';
+  }
 }
 
 /* ---------------------------
